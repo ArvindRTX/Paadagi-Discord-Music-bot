@@ -28,6 +28,63 @@ logging.basicConfig(
 )
 logger = logging.getLogger("DiscordMusicBot")
 
+def sanitize_cookies_content(content: str) -> str:
+    """
+    Sanitizes cookie content by ensuring proper tab separation and newlines.
+    Useful when environment variables mangle tabs into spaces or strip newlines.
+    """
+    lines = content.strip().split('\n')
+    sanitized_lines = []
+    
+    # Netscape cookies file header
+    if not any(line.startswith('# Netscape HTTP Cookie File') for line in lines[:3]):
+        sanitized_lines.append('# Netscape HTTP Cookie File')
+        sanitized_lines.append('# This file was auto-generated and sanitized from env variables')
+        
+    for line in lines:
+        line_strip = line.strip()
+        if not line_strip:
+            continue
+        if line_strip.startswith('#'):
+            # Keep comments as is
+            sanitized_lines.append(line_strip)
+            continue
+            
+        # Split by tabs first
+        parts = line_strip.split('\t')
+        if len(parts) < 7:
+            # If not split by tabs, try splitting by whitespace (spaces or multiple spaces)
+            parts = line_strip.split()
+            
+        if len(parts) >= 7:
+            # Reconstruct with tab separation
+            domain = parts[0]
+            include_subdomains = parts[1]
+            path = parts[2]
+            secure = parts[3]
+            expiry = parts[4]
+            name = parts[5]
+            value = " ".join(parts[6:]) # Rejoin value in case value had spaces
+            
+            # Standardize boolean values to uppercase TRUE/FALSE
+            include_subdomains = "TRUE" if include_subdomains.upper() in ("TRUE", "YES", "1") else "FALSE"
+            secure = "TRUE" if secure.upper() in ("TRUE", "YES", "1") else "FALSE"
+            
+            sanitized_line = f"{domain}\t{include_subdomains}\t{path}\t{secure}\t{expiry}\t{name}\t{value}"
+            sanitized_lines.append(sanitized_line)
+        else:
+            # Keep line as is if it doesn't match standard cookie structure
+            sanitized_lines.append(line_strip)
+            
+    return '\n'.join(sanitized_lines) + '\n'
+
+
+# Check for a User-Agent configuration
+USER_AGENT = os.getenv("YTDL_USER_AGENT")
+if not USER_AGENT:
+    # Use a modern Chrome desktop user-agent as default
+    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 # yt-dlp configurations
 # We use options that restrict downloading, search for single audio stream, and suppress outputs.
 YTDL_OPTIONS = {
@@ -42,8 +99,14 @@ YTDL_OPTIONS = {
     'source_address': '0.0.0.0', # Bind to IPv4 to prevent connection issues
     'extractor_args': {
         'youtube': {
-            'player_client': ['web_embedded', 'android', 'ios', 'web_safari']
+            'player_client': ['default', '-android_sdkless']
         }
+    },
+    'http_headers': {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-us,en;q=0.5',
+        'Referer': 'https://www.google.com/',
     }
 }
 
@@ -55,8 +118,41 @@ if COOKIES_CONTENT:
     # Write inline cookie content from env variable to a temporary file
     temp_cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_cookies.txt")
     try:
+        import base64
+        decoded_content = None
+        
+        # Strip whitespace and quotes
+        stripped = COOKIES_CONTENT.strip()
+        if (stripped.startswith('"') and stripped.endswith('"')) or (stripped.startswith("'") and stripped.endswith("'")):
+            stripped = stripped[1:-1].strip()
+            
+        # Try base64 decoding first
+        try:
+            # Remove all whitespace (including newlines from wrapped base64 strings)
+            b64_candidate = "".join(stripped.split())
+            if re.match(r'^[A-Za-z0-9+/=]+$', b64_candidate):
+                decoded_bytes = base64.b64decode(b64_candidate.encode('utf-8'), validate=True)
+                decoded_str = decoded_bytes.decode('utf-8')
+                # Check if it actually looks like a cookies file
+                if "# Netscape" in decoded_str or any(line.strip().startswith('#') for line in decoded_str.split('\n')[:5]):
+                    decoded_content = decoded_str
+                    logger.info("Successfully decoded base64 cookies from YTDL_COOKIES_CONTENT.")
+        except Exception as e:
+            logger.debug(f"YTDL_COOKIES_CONTENT was not base64: {e}")
+            
+        if decoded_content is None:
+            # If not base64, treat as raw text
+            # Unescape common escaped representations of tabs/newlines
+            decoded_content = COOKIES_CONTENT.replace('\\n', '\n').replace('\\t', '\t')
+            if (decoded_content.startswith('"') and decoded_content.endswith('"')) or (decoded_content.startswith("'") and decoded_content.endswith("'")):
+                decoded_content = decoded_content[1:-1]
+            logger.info("Loaded YTDL_COOKIES_CONTENT as raw text.")
+            
+        # Sanitize/repair cookie structure (e.g. fix space-to-tab issues)
+        sanitized_content = sanitize_cookies_content(decoded_content)
+        
         with open(temp_cookie_path, "w", encoding="utf-8") as f:
-            f.write(COOKIES_CONTENT)
+            f.write(sanitized_content)
         COOKIE_FILE = temp_cookie_path
         logger.info("Created temporary cookies file from YTDL_COOKIES_CONTENT environment variable.")
     except Exception as e:

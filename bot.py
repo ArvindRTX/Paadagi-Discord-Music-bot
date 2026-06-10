@@ -10,6 +10,24 @@ from aiohttp import web
 from collections import deque
 from typing import Dict, Optional
 
+# Setup logging configuration first to display upgrade logs
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger("DiscordMusicBot")
+
+# Update yt-dlp to the latest version on startup to prevent YouTube extractor/format breakage
+logger.info("Checking and upgrading yt-dlp to the latest version...")
+try:
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-U", "yt-dlp"])
+    logger.info("Successfully updated/verified yt-dlp package.")
+except Exception as e:
+    logger.error(f"Failed to update yt-dlp on startup: {e}")
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -19,14 +37,6 @@ from dotenv import load_dotenv
 # Load environmental variables from .env
 load_dotenv(override=True)
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-
-# Setup logging configuration
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-logger = logging.getLogger("DiscordMusicBot")
 
 def sanitize_cookies_content(content: str) -> str:
     """

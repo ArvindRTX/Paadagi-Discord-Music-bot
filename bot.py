@@ -189,6 +189,12 @@ FFMPEG_OPTIONS = {
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
 
+# Create a fallback client without cookies to handle cases where cookies are expired, flagged, or invalid
+YTDL_OPTIONS_NO_COOKIES = YTDL_OPTIONS.copy()
+if 'cookiefile' in YTDL_OPTIONS_NO_COOKIES:
+    del YTDL_OPTIONS_NO_COOKIES['cookiefile']
+ytdl_no_cookies = yt_dlp.YoutubeDL(YTDL_OPTIONS_NO_COOKIES)
+
 async def get_spotify_track_info(url: str) -> Optional[dict]:
     """Scrapes Spotify track page for title and artist metadata."""
     async with aiohttp.ClientSession() as session:
@@ -228,11 +234,28 @@ async def extract_info(query: str, loop: asyncio.AbstractEventLoop) -> dict:
         search_query = query
 
     logger.info(f"Extracting info for query: {query}")
-    # Run the blocking yt-dlp call in a thread pool
-    data = await loop.run_in_executor(
-        None,
-        lambda: ytdl.extract_info(search_query, download=False)
-    )
+    
+    try:
+        # First, try with cookies (if configured)
+        data = await loop.run_in_executor(
+            None,
+            lambda: ytdl.extract_info(search_query, download=False)
+        )
+    except Exception as e:
+        # If cookies are not even configured in the options, raise the error directly
+        if 'cookiefile' not in YTDL_OPTIONS:
+            raise e
+            
+        logger.warning(f"Extraction with cookies failed (possibly expired/flagged cookies): {e}. Retrying without cookies...")
+        try:
+            # Fallback to extracting without cookies
+            data = await loop.run_in_executor(
+                None,
+                lambda: ytdl_no_cookies.extract_info(search_query, download=False)
+            )
+        except Exception as fallback_err:
+            logger.error(f"Extraction failed even without cookies: {fallback_err}")
+            raise fallback_err
 
     if not data:
         raise ValueError("Could not extract details for the track.")

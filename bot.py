@@ -40,7 +40,39 @@ YTDL_OPTIONS = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0', # Bind to IPv4 to prevent connection issues
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['web_embedded', 'android', 'ios', 'web_safari']
+        }
+    }
 }
+
+# Check for a cookie file or inline cookie content to bypass YouTube "Sign in to confirm you're not a bot" challenge
+COOKIE_FILE = os.getenv("YTDL_COOKIE_FILE")
+COOKIES_CONTENT = os.getenv("YTDL_COOKIES_CONTENT")
+
+if COOKIES_CONTENT:
+    # Write inline cookie content from env variable to a temporary file
+    temp_cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_cookies.txt")
+    try:
+        with open(temp_cookie_path, "w", encoding="utf-8") as f:
+            f.write(COOKIES_CONTENT)
+        COOKIE_FILE = temp_cookie_path
+        logger.info("Created temporary cookies file from YTDL_COOKIES_CONTENT environment variable.")
+    except Exception as e:
+        logger.error(f"Failed to write temporary cookies file: {e}")
+
+if not COOKIE_FILE:
+    # Fallback to checking default cookies.txt in the current directory
+    default_cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+    if os.path.exists(default_cookie_path):
+        COOKIE_FILE = default_cookie_path
+
+if COOKIE_FILE:
+    logger.info(f"Using cookie file for yt-dlp: {COOKIE_FILE}")
+    YTDL_OPTIONS['cookiefile'] = COOKIE_FILE
+else:
+    logger.warning("No cookie file found/configured. If you experience 'Sign in to confirm you're not a bot' errors, please specify YTDL_COOKIE_FILE or YTDL_COOKIES_CONTENT in your env config, or place a cookies.txt file in the bot root directory.")
 
 # FFmpeg configuration with reconnect options
 # These parameters prevent the streams from abruptly dropping midway through playback

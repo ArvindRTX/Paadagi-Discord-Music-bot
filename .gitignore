@@ -28,3 +28,9 @@ Thumbs.db
 # Logs and databases
 *.log
 db.sqlite3
+
+# YouTube cookies
+cookies.txt
+temp_cookies.txt
+
+
